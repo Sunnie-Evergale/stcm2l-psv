@@ -5,6 +5,139 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.22] - 2026-01-01
+
+### Fixed
+- **Narration being combined with dialogue**: Fixed issue where Type 0x0F narration entries were being incorrectly combined with dialogue entries and given speaker labels
+  - Root cause: Type 0x0F was included in the Type 0x02/0x03 speaker combining list
+  - Type 0x0F can be dialogue continuation OR narration, similar to Type 0x07
+  - Removed Type 0x0F from the Type 0x02/0x03 combine list (line 414)
+  - Type 0x0F entries are now processed independently and will not be labeled with speaker names
+  - Also added capital letter check to prevent combining dialogue with narration when text ends with sentence punctuation
+
+### Changed
+- Removed Type 0x0F from Type 0x02/0x03 speaker combining list
+- Added sentence-ending punctuation check including ASCII period (`.`)
+- Added capital letter detection for new sentence/narration boundary
+- File 106: Entry 965 now correctly separates dialogue from narration
+
+### Example of Fixed Entry (File 106, Entry 965)
+**v1.1.21 (incorrectly combined - narration has speaker label):**
+```
+--- Entry 954 (Type: 4) ---
+Speaker: Rath
+Text:
+"...Shut up. I'm fine alone." When Rath's blue eyes emit something gloomy in the dark, I unintentionally gulp. My heart trembles.
+```
+
+**v1.1.22 (correctly separated - narration has no speaker):**
+```
+--- Entry 965 (Type: 4) ---
+Speaker: Rath
+Text:
+"...Shut up. I'm fine alone."
+
+--- Entry 966 (Type: 15) ---
+Text:
+When Rath's blue eyes emit something gloomy in the dark,
+
+--- Entry 967 (Type: 6) ---
+Text:
+I unintentionally gulp.
+
+--- Entry 968 (Type: 5) ---
+Text:
+My heart trembles.
+```
+
+**Finding:** Type 0x0F, like Type 0x07, can contain either dialogue continuation OR narration. By including it in the Type 0x02/0x03 combine list, narration text was being labeled with speaker names. The fix removes Type 0x0F from the combine list, allowing it to be processed independently. The additional capital letter check prevents combining entries when a complete sentence is followed by text starting with a capital letter (indicating a new sentence or narration).
+
+## [1.1.21] - 2025-12-31
+
+### Fixed
+- **Type 0x07 narration being incorrectly combined with speaker labels**: Fixed issue where Type 0x07 narration entries were being combined with speaker labels from preceding Type 0x02/0x03 speaker entries
+  - Root cause: Type 0x07 was included in the Type 0x02/0x03 speaker combining list, causing narration to be labeled with speaker names
+  - Type 0x07 entries can be dialogue OR narration, and have separate logic (lines 536-623) to determine which
+  - By removing Type 0x07 from the Type 0x02/0x03 combine list, Type 0x07 entries are now processed independently
+  - The Type 0x07 logic correctly identifies narration by looking backward and stopping at dialogue entries (Type 0x04, 0x05, 0x06, etc.)
+
+### Changed
+- Removed Type 0x07 from Type 0x02/0x03 speaker combining list
+- Type 0x07 entries now processed independently by their own logic to determine dialogue vs narration
+- File 106: 1297 entries → 1292 entries (some incorrectly combined entries are now separate)
+
+### Example of Fixed Entry (File 106, Entry 947-948)
+**v1.1.20 (incorrectly combined - narration has speaker label):**
+```
+--- Entry 954 (Type: 4) ---
+Speaker: Rath
+Text:
+"...Ha...ha..." His breathing is ragged.
+```
+
+**v1.1.21 (correctly separated - narration has no speaker):**
+```
+--- Entry 947 (Type: 4) ---
+Speaker: Rath
+Text:
+"...Ha...ha..."
+
+--- Entry 948 (Type: 7) ---
+Text:
+His breathing is ragged. 食い破った喉、だくだくと溢れる鮮血を
+```
+
+**Finding:** Type 0x07 entries can be dialogue continuation OR narration. The Type 0x07 logic (lines 536-623) determines this by looking backward for a speaker. If it finds a Type 0x04/0x05/0x06/0x07/0x0D/0x0E entry before finding a Type 0x02/0x03 speaker, it treats the Type 0x07 as narration (no speaker). By allowing Type 0x02/0x03 to combine Type 0x07 entries, this logic was bypassed.
+
+## [1.1.20] - 2025-12-31
+
+### Fixed
+- **False positive bytecode pattern filtering normal English text**: Fixed issue where normal English text containing the word "sure" was being filtered out as bytecode
+  - Root cause: Bytecode pattern `\bsure\d*` was matching the English word "sure" (requires zero or more digits)
+  - File 106: Entry 1014/1015 was truncated - missing "he's checking to make sure I'm asleep."
+  - Binary analysis confirmed Type 0x0A entry exists at offset 0x49350 with text "he's checking to make sure I'm asleep."
+  - Changed pattern to `\bsure\d+` (requires one or more digits) to prevent false positives on normal English text
+  - Also improved merging logic to track entry offsets for better handling of duplicate indices
+
+### Changed
+- Fixed bytecode pattern `\bsure\d*` → `\bsure\d+` to require at least one digit after "sure"
+- Added offset tracking to compact and padded format parsers (stored in `offset` field)
+- Improved merging logic to sort entries by (index, offset) instead of just index
+- File 106: 1287 entries → 1297 entries (+10 entries recovered, including the Type 0x0A at 0x49350)
+
+### Example of Recovered Entry (File 106, Entry 1015)
+**v1.1.19 (truncated - missing Type 0x0A):**
+```
+--- Entry 1014 (Type: 13) ---
+Speaker: #Name[1]
+Text:
+#Name[1]
+In time, Rath stands up in a manner that's as if
+
+--- Entry 1015 (Type: 6) ---
+Speaker: #Name[1]
+Text:
+#Name[1]
+(...What's going on?)
+```
+
+**v1.1.20 (Type 0x0A included and combined):**
+```
+--- Entry 1015 (Type: 13) ---
+Speaker: #Name[1]
+Text:
+#Name[1]
+In time, Rath stands up in a manner that's as if he's checking to make sure I'm asleep.  ← NEW!
+
+--- Entry 1016 (Type: 6) ---
+Speaker: #Name[1]
+Text:
+#Name[1]
+(...What's going on?)
+```
+
+**Finding:** The bytecode pattern `\bsure\d*` was meant to match bytecode variables like `sure1`, `sure2` but was also matching the English word "sure" in normal dialogue. The `\d*` quantifier matches zero or more digits, so "sure" alone was a match. Changing to `\d+` requires at least one digit.
+
 ## [1.1.19] - 2025-12-30
 
 ### Fixed

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-STCM2L Script Decompiler v1.1.20
+STCM2L Script Decompiler v1.1.22
 
 Decompiles STCM2L binary script files to readable text format for translation.
 
@@ -9,6 +9,15 @@ Supports two formats:
 - Full STCM2L format: Files with GLOBAL_DATA and CODE_START_ bytecode sections
 
 Changelog:
+    v1.1.22 - Fixed narration being combined with dialogue
+        - Removed Type 0x0F from Type 0x02/0x03 speaker combining list
+        - Type 0x0F can be dialogue OR narration, similar to Type 0x07
+        - Added capital letter check to prevent combining complete sentences with new sentences/narration
+        - Fixed entry 965 in file 106 (dialogue + narration incorrectly combined)
+    v1.1.21 - Fixed Type 0x07 narration being incorrectly combined with speaker labels
+        - Removed Type 0x07 from Type 0x02/0x03 speaker combining list
+        - Type 0x07 entries now processed independently to determine dialogue vs narration
+        - Fixed entries 947-948 and 1005-1006 in file 106
     v1.1.20 - Fixed index collision bug in merging logic
         - Added offset tracking to compact and padded format parsers
         - Fixed merging logic to handle multiple entries with same index correctly
@@ -45,7 +54,7 @@ Changelog:
 See CHANGELOG.md for full version history.
 """
 
-__version__ = "1.1.20"
+__version__ = "1.1.21"
 __author__ = "STCM2L Decompilation Project"
 # Output directory derived from version (e.g., v1.1.12 -> decompiled_v1.1.12/)
 OUTPUT_DIR = f"decompiled_v{__version__}"
@@ -394,13 +403,15 @@ class STCM2LDecompiler:
                         next_type = next_entry.get('type', 0)
                         next_text = next_entry.get('text', '')
 
-                        # v1.1.10: Combine Type 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C dialogue entries (exclude 0x12 narration)
+                        # v1.1.10: Combine Type 0x04, 0x05, 0x06, 0x08, 0x09, 0x0A, 0x0B, 0x0C dialogue entries (exclude 0x07, 0x0F, 0x12 narration)
+                        # v1.1.20: Removed 0x07 from combine list - Type 0x07 has separate logic to detect dialogue vs narration
+                        # v1.1.22: Removed 0x0F from combine list - Type 0x0F can be dialogue OR narration
                         # v1.1.13: Added 0x01 to exclude list - Type 0x01 choice options should NOT combine with dialogue
                         # v1.1.14: Added 0x03 to combine list - Type 0x03 can be dialogue continuation (e.g., "a Lobeira.")
                         # v1.1.15: Added 0x0D, 0x0E, 0x0F to combine list - Type 0x0D, 0x0E, 0x0F are dialogue continuation types
                         # v1.1.18: Added 0x10 to combine list - Type 0x10 is dialogue continuation type
                         # v1.1.19: Added 0x11 to combine list - Type 0x11 is dialogue continuation type
-                        if next_type not in (0x01, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10, 0x11):
+                        if next_type not in (0x01, 0x03, 0x04, 0x05, 0x06, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x10, 0x11):
                             break
 
                         # Stop at #Name[X] indicators (speaker change)
@@ -436,6 +447,19 @@ class STCM2LDecompiler:
                                 break
                             if (combined_has_english and next_has_japanese and not next_has_english):
                                 break
+
+                        # v1.1.22: Don't combine if previous entry ended with sentence punctuation
+                        # and current entry starts with a capital letter (likely new sentence/narration)
+                        # Exception: "I'm", "I ", etc. are first-person continuations, not new sentences
+                        if dialogue_parts and next_text:
+                            prev_ended = dialogue_parts[-1].rstrip()
+                            # Check for sentence-ending punctuation (including ASCII period)
+                            if prev_ended.endswith(('.', '!', '?', '\u3002', '\uff01', '\uff0f')):
+                                # If current starts with capital, check if it's a new sentence
+                                if next_text[0].isupper():
+                                    # First-person "I" is a continuation, not a new sentence
+                                    if not next_text.startswith("I'm") and not next_text.startswith("I "):
+                                        break
 
                         dialogue_parts.append(next_text)
                         i += 1
@@ -1273,7 +1297,7 @@ class STCM2LDecompiler:
         # Check for bytecode/variable patterns (using word boundaries to avoid partial matches)
         import re
         bytecode_patterns = [
-            r'\bRelease_', r'\bRute_count_', r'\bFav[A-Z]', r'\bLH_sel_', r'\bsure\d*',
+            r'\bRelease_', r'\bRute_count_', r'\bFav[A-Z]', r'\bLH_sel_', r'\bsure\d+',  # v1.1.20: Fixed to require digit after 'sure'
             r'\bsuma\b', r'\bmemory_', r'\bCOLLECTION_LINK', r'\bEXPORT_DATA', r'\bswitch',
             r'\bscene_play', r'\brathL', r'\belzaL', r'\bzara0', r'\bness0', r'\bher\d+',
             r'\bzk\d+', r'\bbg\d+',  # Bytecode variable patterns
