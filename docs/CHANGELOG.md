@@ -5,6 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.27] - 2026-01-01
+
+### Fixed
+- **Quote closure across Type 8/10 entries not working**: Fixed issue where unclosed quotes spanning Type 0x08/0x0A entries were not being combined
+  - Root cause: Quote closure logic was only implemented in speaker combining handler (line 403-442), but entries with `#Name[X]` indicators are processed through standalone dialogue handler (line 684+)
+  - Added quote closure logic to standalone dialogue handler (lines 782-804)
+  - After `should_combine_entries` returns False due to terminal punctuation + capital letter, check if combined text has unclosed quote
+  - If unclosed quote found, continue combining Type 0x08/0x0A/0x0C/0x0D entries until quote is closed
+  - Added Type 0x08 and 0x0A to quote closure continuation list in speaker combining handler (line 410)
+  - Entries with unclosed quotes now properly combine across Type 8/10/12 boundaries
+
+### Analysis
+- Binary structure investigation at offset 0x36ce8 (Entry 672 in v1.1.26, 667 in v1.1.27) confirmed Type 0x08 entry has unclosed quote: `"Here, please come and look.`
+- Entry 673 (Type 0x0A) continues with: `If you're just looking, that's free.`
+- Entry 674 (Type 0x0C) closes quote: `If you see anything you like, just tell me."`
+- The terminal punctuation check stopped combining after Entry 672, and quote closure logic didn't exist in standalone dialogue handler
+- `#Name[1]` is NOT in SPEAKER_NAMES set, so it's processed as a name indicator, not a speaker name
+- Name indicator entries use look-back logic (line 686+) to find the `#Name[X]` prefix and prepend it to text
+- This means these entries go through standalone dialogue handler, not speaker combining handler
+
+### Example of Fixed Entry (File 107)
+**Entry 672-674 (v1.1.26):**
+```
+--- Entry 672 (Type: 8) ---
+Speaker: #Name[1]
+Text: "Here, please come and look.
+
+--- Entry 673 (Type: 10) ---
+Text: If you're just looking, that's free.
+
+--- Entry 674 (Type: 12) ---
+Text: If you see anything you like, just tell me."
+```
+
+**Entry 667 (v1.1.27):**
+```
+--- Entry 667 (Type: 8) ---
+Speaker: #Name[1]
+Text: "Here, please come and look. If you're just looking, that's free. If you see anything you like, just tell me."
+```
+
+### Changed
+- File 107: 767 entries (v1.1.26) → 755 entries (v1.1.27) = 12 entries combined due to quote closure fix
+
 ## [1.1.26] - 2026-01-01
 
 ### Fixed
