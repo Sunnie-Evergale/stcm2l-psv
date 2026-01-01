@@ -11,7 +11,7 @@ Supports two formats:
 See CHANGELOG.md for full version history.
 """
 
-__version__ = "1.1.26"
+__version__ = "1.1.25"
 __author__ = "STCM2L Decompilation Project"
 # Output directory derived from version (e.g., v1.1.12 -> decompiled_v1.1.12/)
 OUTPUT_DIR = f"decompiled_v{__version__}"
@@ -374,11 +374,6 @@ class STCM2LDecompiler:
 
                         # Stop at #Name[X] indicators (speaker change)
                         if self.is_name_indicator(next_text):
-                            break
-
-                        # v1.1.26: Stop combining if entry starts with "--" (structural marker for speaker change)
-                        # Binary analysis shows this pattern indicates entry should NOT combine with previous speaker
-                        if next_text.strip().startswith('"--'):
                             break
 
                         # Stop if text ends with terminal punctuation (. ! ? 。 ！ ？)

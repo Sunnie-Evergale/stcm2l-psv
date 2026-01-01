@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-STCM2L Script Decompiler v1.1.25
+STCM2L Script Decompiler v1.1.24
 
 Decompiles STCM2L binary script files to readable text format for translation.
 
@@ -11,7 +11,7 @@ Supports two formats:
 See CHANGELOG.md for full version history.
 """
 
-__version__ = "1.1.26"
+__version__ = "1.1.24"
 __author__ = "STCM2L Decompilation Project"
 # Output directory derived from version (e.g., v1.1.12 -> decompiled_v1.1.12/)
 OUTPUT_DIR = f"decompiled_v{__version__}"
@@ -360,83 +360,42 @@ class STCM2LDecompiler:
                         next_type = next_entry.get('type', 0)
                         next_text = next_entry.get('text', '')
 
-                        # v1.1.10: Combine Type 0x04, 0x05, 0x06, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E dialogue entries (exclude 0x07, 0x0F, 0x12 narration)
+                        # v1.1.10: Combine Type 0x04, 0x05, 0x06, 0x08, 0x09, 0x0A, 0x0B, 0x0C dialogue entries (exclude 0x07, 0x0F, 0x12 narration)
                         # v1.1.20: Removed 0x07 from combine list - Type 0x07 has separate logic to detect dialogue vs narration
                         # v1.1.22: Removed 0x0F from combine list - Type 0x0F can be dialogue OR narration
                         # v1.1.13: Added 0x01 to exclude list - Type 0x01 choice options should NOT combine with dialogue
                         # v1.1.14: Added 0x03 to combine list - Type 0x03 can be dialogue continuation (e.g., "a Lobeira.")
-                        # v1.1.15: Added 0x0D, 0x0E to combine list - Type 0x0D, 0x0E are dialogue continuation types
+                        # v1.1.15: Added 0x0D, 0x0E, 0x0F to combine list - Type 0x0D, 0x0E, 0x0F are dialogue continuation types
                         # v1.1.18: Added 0x10 to combine list - Type 0x10 is dialogue continuation type
                         # v1.1.19: Added 0x11 to combine list - Type 0x11 is dialogue continuation type
-                        # v1.1.25: Added 0x0C to combine list - Type 0x0C dialogue with speaker should combine
-                        if next_type not in (0x01, 0x03, 0x04, 0x05, 0x06, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10, 0x11):
+                        if next_type not in (0x01, 0x03, 0x04, 0x05, 0x06, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x10, 0x11):
                             break
 
                         # Stop at #Name[X] indicators (speaker change)
                         if self.is_name_indicator(next_text):
                             break
 
-                        # v1.1.26: Stop combining if entry starts with "--" (structural marker for speaker change)
-                        # Binary analysis shows this pattern indicates entry should NOT combine with previous speaker
-                        if next_text.strip().startswith('"--'):
-                            break
-
                         # Stop if text ends with terminal punctuation (. ! ? 。 ！ ？)
                         # v1.1.23: Added ASCII period (.) to prevent combining complete sentences with new sentences
                         # v1.1.24: Continue combining Type 12/13 entries after terminal punctuation
-                        # v1.1.25: Enhanced quote matching to look multiple entries ahead for quote closure
-                        # v1.1.25: Don't treat ... (ellipsis) as terminal punctuation
-                        stripped_text = next_text.rstrip()
-                        # Check if ends with terminal punctuation, but NOT ellipsis (...)
-                        ends_with_punct = (
-                            stripped_text.endswith(('.', '!', '?', '\u3002', '\uff01', '\uff0f')) and
-                            not stripped_text.endswith('...') and
-                            not stripped_text.endswith('。。。')
-                        )
-                        if ends_with_punct:
+                        if next_text.rstrip().endswith(('.', '!', '?', '\u3002', '\uff01', '\uff0f')):
                             dialogue_parts.append(next_text)
                             i += 1
-
-                            # Check if we need to continue for quote closure (multi-entry lookahead)
-                            combined_check = ' '.join(dialogue_parts)
-                            if combined_check.count('"') % 2 == 1:  # Odd quotes = unclosed
-                                # Look ahead for quote closure across multiple entries
-                                while i < len(entries):
-                                    next_type = entries[i].get('type', 0)
+                            # Check if next entry is Type 12/13 (continuation narration)
+                            if i < len(entries):
+                                next_type = entries[i].get('type', 0)
+                                if next_type in (0x0C, 0x0D):  # Type 12 or 13
+                                    continue  # Keep combining Type 12/13 entries
+                                # v1.1.24: Also check if next Type 4/6 entry continues the quote (closing quote)
+                                if next_type in (0x04, 0x06):
                                     next_text_check = entries[i].get('text', '')
-
-                                    # Type 12/13: Always continue (narration between dialogue parts)
-                                    if next_type in (0x0C, 0x0D):
-                                        dialogue_parts.append(next_text_check)
-                                        i += 1
-                                        continue
-
-                                    # Type 4/6/3/15: Check if it closes the quote
-                                    if next_type in (0x04, 0x06, 0x03, 0x0F):
-                                        # If entry has any quotes, add it and check if quote is now closed
-                                        if next_text_check.count('"') > 0:
-                                            dialogue_parts.append(next_text_check)
-                                            i += 1
-                                            # Check if quote is now closed
-                                            combined_check = ' '.join(dialogue_parts)
-                                            if combined_check.count('"') % 2 == 0:
-                                                break  # Quote closed, stop combining
-                                            # Quote still unclosed, continue to next entry
-                                            continue
-                                        # No quote found but might be continuation text
-                                        # Only continue if it's part of trailing speech (lowercase start, no terminal punctuation)
-                                        elif next_text_check and not next_text_check[0].isupper():
-                                            dialogue_parts.append(next_text_check)
-                                            i += 1
-                                            continue
-                                        else:
-                                            # Capital letter start = likely new sentence, stop combining
-                                            break
-                                    else:
-                                        # Different type, stop combining
-                                        break
-
-                            break  # Break if no unclosed quote or quote was closed
+                                    # If combined text has odd quotes (unclosed), check if next entry closes the quote
+                                    combined_check = ' '.join(dialogue_parts)
+                                    if combined_check.count('"') % 2 == 1:
+                                        # Next entry ends with closing quote or starts with closing quote
+                                        if next_text_check.rstrip().endswith('"') or next_text_check.lstrip().startswith('"'):
+                                            continue  # Quote continuation found, keep combining
+                            break
 
                         # Skip bytecode entries
                         if self.is_bytecode(next_text):
@@ -465,23 +424,12 @@ class STCM2LDecompiler:
                         # v1.1.22: Don't combine if previous entry ended with sentence punctuation
                         # and current entry starts with a capital letter (likely new sentence/narration)
                         # Exception: "I'm", "I ", etc. are first-person continuations, not new sentences
-                        # v1.1.25: Also skip capital letter check if there's an unclosed quote
-                        # v1.1.25: Don't treat ... (ellipsis) as terminal punctuation
                         if dialogue_parts and next_text:
                             prev_ended = dialogue_parts[-1].rstrip()
-                            # Check for sentence-ending punctuation (including ASCII period), but NOT ellipsis
-                            prev_ends_punct = (
-                                prev_ended.endswith(('.', '!', '?', '\u3002', '\uff01', '\uff0f')) and
-                                not prev_ended.endswith('...') and
-                                not prev_ended.endswith('。。。')
-                            )
-                            if prev_ends_punct:
-                                # v1.1.25: Check if combined text has unclosed quote before capital letter check
-                                combined_check = ' '.join(dialogue_parts)
-                                if combined_check.count('"') % 2 == 1:  # Odd quotes = unclosed
-                                    # Unclosed quote, continue combining regardless of capital letter
-                                    pass  # Don't break, let the combining continue
-                                elif next_text[0].isupper():
+                            # Check for sentence-ending punctuation (including ASCII period)
+                            if prev_ended.endswith(('.', '!', '?', '\u3002', '\uff01', '\uff0f')):
+                                # If current starts with capital, check if it's a new sentence
+                                if next_text[0].isupper():
                                     # First-person "I" is a continuation, not a new sentence
                                     if not next_text.startswith("I'm") and not next_text.startswith("I "):
                                         break
@@ -671,12 +619,11 @@ class STCM2LDecompiler:
                 i += 1
                 continue
 
-            # Handle Type 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10, 0x11 entries (dialogue only) - v1.1.10: exclude 0x12 narration
+            # Handle Type 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x10, 0x11 entries (dialogue only) - v1.1.10: exclude 0x12 narration
             # v1.1.15: Added 0x0D, 0x0E to type list
             # v1.1.18: Added 0x10 to type list
             # v1.1.19: Added 0x11 to type list
-            # v1.1.25: Added 0x0F to type list (Type 0x0F consecutive entries should combine)
-            if current_type in (0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10, 0x11):
+            if current_type in (0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x10, 0x11):
                 # Check for #Name[X] indicators before this dialogue
                 name_indicator = None
                 j = i - 1
@@ -687,7 +634,7 @@ class STCM2LDecompiler:
                     if self.is_name_indicator(prev_text):
                         name_indicator = prev_text
                         j -= 1
-                    elif prev_type in (0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10, 0x11):  # v1.1.25: Added 0x0F
+                    elif prev_type in (0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x10, 0x11):
                         # v1.1.14: Stop at any previous dialogue entry (not just Type 0x04)
                         # This prevents looking too far back across multiple dialogues
                         break
@@ -725,9 +672,8 @@ class STCM2LDecompiler:
                     # v1.1.15: Added 0x0D, 0x0E to combine list - Type 0x0D, 0x0E are dialogue continuation types
                     # v1.1.18: Added 0x10 to combine list - Type 0x10 is dialogue continuation type
                     # v1.1.19: Added 0x11 to combine list - Type 0x11 is dialogue continuation type
-                    # v1.1.25: Added 0x0F to combine list - Type 0x0F consecutive entries should combine
                     # Type 0x0B/0x0C can be followed by Type 0x0A continuation
-                    if next_type not in (0x01, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10, 0x11):
+                    if next_type not in (0x01, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x10, 0x11):
                         break
 
                     # Don't cross name indicator boundaries

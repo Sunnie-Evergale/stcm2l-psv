@@ -5,6 +5,178 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.26] - 2026-01-01
+
+### Fixed
+- **Entries starting with `"--` wrongly combined with previous speaker**: Fixed issue where Type 0x0B entries starting with `"--` (quote-dash-dash) were being combined with the preceding speaker
+  - Root cause: Binary analysis confirmed `"--` prefix at start of entry is a structural marker indicating speaker context change
+  - Added check `if next_text.strip().startswith('"--'): break` in speaker combining logic
+  - These entries now become standalone entries without incorrect speaker attribution
+
+### Analysis
+- Binary structure investigation at offset 0x4ee00 confirmed `"--` is part of text data, not a structural separator
+- Pattern analysis of file 106 showed only ONE entry (1317) had `"--` at START with a speaker
+- Other entries with `--` in middle (em dash usage like "And -- of all things") are unaffected
+
+### Example of Fixed Entry (File 106)
+**Entry 1317 (v1.1.25):**
+```
+--- Entry 1317 (Type: 4) ---
+Speaker: Rath
+Text: "--it's not there, where are you going?" I give him a very vague answer.
+```
+
+**Entry 1317 (v1.1.26) - Expected:**
+```
+--- Entry 1317 (Type: 4) ---
+Text: "--it's not there, where are you going?" I give him a very vague answer.
+```
+(Standalone entry, no incorrect speaker attribution)
+
+## [1.1.25] - 2026-01-01
+
+### Fixed
+- **Multi-entry quote closure not working**: Fixed issue where split quotes across 3+ entries were not being combined
+  - Root cause: v1.1.24 quote matching logic only looked ONE entry ahead for quote closure
+  - Enhanced to loop through multiple entries after terminal punctuation break
+  - Now handles cases where closing quote is 2+ entries ahead
+- **Type 15 (0x0F) entries not being combined**: Fixed issue where consecutive Type 0x0F entries were not being combined
+  - Root cause: Type 0x0F was removed from combine lists in v1.1.22 due to "dialogue OR narration" ambiguity
+  - Re-added Type 0x0F to standalone dialogue handler combine lists
+  - Type 0x0F entries that follow each other are now properly combined
+
+### Changed
+- Enhanced quote matching logic to look multiple entries ahead for quote closure
+- Added Type 0x0F to standalone dialogue combine lists (lines 654, 665, 705)
+- Quote closure now handles Type 4/6/3/15 entries across multiple lookahead iterations
+
+### Example of Fixed Entries (File 106)
+**Entry 1057-1059 (multi-entry quote closure):**
+```
+v1.1.24 (incorrectly split):
+--- Entry 1057 (Type: 4) ---
+Speaker: Rath
+Text: "Ah. I'm...
+
+--- Entry 1058 (Type: 4) ---
+Text: I woke you up.
+
+--- Entry 1059 (Type: 3) ---
+Text: My bad..."
+
+v1.1.25 (correctly combined):
+--- Entry 1057 (Type: 4) ---
+Speaker: Rath
+Text: "Ah. I'm... I woke you up. My bad..."
+```
+
+**Entry 1077-1078 (Type 15 combining):**
+```
+v1.1.24 (incorrectly split):
+--- Entry 1077 (Type: 15) ---
+Text: Rath had, always, through I don't know what kind of magic,
+
+--- Entry 1078 (Type: 15) ---
+Text: built a fire the night before which never stopped burning.
+
+v1.1.25 (correctly combined):
+--- Entry 1077 (Type: 15) ---
+Text: Rath had, always, through I don't know what kind of magic, built a fire the night before which never stopped burning.
+```
+
+## [1.1.24] - 2026-01-01
+
+### Fixed
+- **Split quotes not being combined across Type 12/13 narration entries**: Fixed issue where dialogue split across multiple entries by Type 12/13 narration was not being properly combined
+  - Root cause: Terminal punctuation check broke combining before checking if Type 12/13 entries followed
+  - After terminal punctuation, now continues combining if next entry is Type 12/13
+  - Also continues combining if next Type 4/6 entry closes an unclosed quote (odd quote count detection)
+  - File 106: Entry count decreased from 1358 (v1.1.23) to 1349 (v1.1.24) due to proper combining
+
+### Changed
+- Added quote matching logic to detect unclosed quotes after terminal punctuation
+- Type 12/13 entries (continuation narration) now combined with dialogue even after periods
+- Prevents fragmentation of multi-part dialogue sentences
+
+### Example of Fixed Entry (File 106, entries 879-881)
+**v1.1.23 (incorrectly split):**
+```
+--- Entry 879 (Type: 4) ---
+Speaker: Rath
+Text:
+"It's a bad feeling.
+
+--- Entry 880 (Type: 12) ---
+Text:
+When I'm touched it's definitely a bad feeling.
+
+--- Entry 881 (Type: 4) ---
+Text:
+I feel weak."
+```
+
+**v1.1.24 (correctly combined):**
+```
+--- Entry 876 (Type: 4) ---
+Speaker: Rath
+Text:
+"It's a bad feeling. When I'm touched it's definitely a bad feeling. I feel weak."
+```
+
+## [1.1.23] - 2026-01-01
+
+### Fixed
+- **ASCII period missing from terminal punctuation check**: Fixed critical bug where ASCII period (`.`) was not included in the terminal punctuation list for speaker combining logic
+  - Root cause: Line 422 only checked for `!`, `?`, `。`, `！`, `？` but NOT `.`
+  - This caused complete sentences ending with periods to continue combining with subsequent entries
+  - Result: Narration starting with capital letters was incorrectly combined with dialogue and given speaker labels
+  - Added `.` to the terminal punctuation list at line 423
+
+### Changed
+- Added ASCII period (`.`) to terminal punctuation check in speaker combining logic
+- File 106: Entries now correctly split at sentence boundaries (e.g., entry 966 vs 967 vs 968)
+
+### Example of Fixed Entry (File 106)
+**v1.1.21 (incorrectly combined - narration has speaker label):**
+```
+--- Entry 954 (Type: 4) ---
+Speaker: Rath
+Text:
+"...Shut up. I'm fine alone." When Rath's blue eyes emit something gloomy in the dark, I unintentionally gulp. My heart trembles.
+```
+
+**v1.1.23 (correctly separated - narration has no speaker):**
+```
+--- Entry 966 (Type: 4) ---
+Speaker: Rath
+Text:
+"...Shut up.
+
+--- Entry 967 (Type: 5) ---
+Text:
+I'm fine alone."
+
+--- Entry 968 (Type: 15) ---
+Text:
+When Rath's blue eyes emit something gloomy in the dark,
+```
+
+### Research Summary
+Conducted comprehensive research on three existing STCM2L repositories:
+- xyzz/hkki (C++ - Hakkuouki DS game)
+- kubo25/Diabolik-Lovers-STCM2L-Editor (C#)
+- Yggdrasill-Moe/Helheim (Python - Chinese project)
+
+**Key Findings:**
+- Other repositories use different file format (bytecode CODE_START_ vs pre-parsed dialogue format)
+- Other repos use opcodes (D2, D4, E7) vs our Type field (0x01-0x12) - different systems
+- Other repos use simpler sequential collection approach (no complex combining logic)
+- Our Type 0x07/0x0F narration detection is unique and valuable (kept in implementation)
+- Parameter filter `param >> 30 == 0` from Helheim repo not applicable to our format
+
+**Conclusion:**
+Our implementation uses a different file format than other repositories. The combining logic complexity is necessary for our format's specific challenges. The ASCII period bug was the root cause of many incorrectly combined entries.
+
 ## [1.1.22] - 2026-01-01
 
 ### Fixed
@@ -14,40 +186,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Removed Type 0x0F from the Type 0x02/0x03 combine list (line 414)
   - Type 0x0F entries are now processed independently and will not be labeled with speaker names
   - Also added capital letter check to prevent combining dialogue with narration when text ends with sentence punctuation
-
-### Changed
-- Removed Type 0x0F from Type 0x02/0x03 speaker combining list
-- Added sentence-ending punctuation check including ASCII period (`.`)
-- Added capital letter detection for new sentence/narration boundary
-- File 106: Entry 965 now correctly separates dialogue from narration
-
-### Example of Fixed Entry (File 106, Entry 965)
-**v1.1.21 (incorrectly combined - narration has speaker label):**
-```
---- Entry 954 (Type: 4) ---
-Speaker: Rath
-Text:
-"...Shut up. I'm fine alone." When Rath's blue eyes emit something gloomy in the dark, I unintentionally gulp. My heart trembles.
-```
-
-**v1.1.22 (correctly separated - narration has no speaker):**
-```
---- Entry 965 (Type: 4) ---
-Speaker: Rath
-Text:
-"...Shut up. I'm fine alone."
-
---- Entry 966 (Type: 15) ---
-Text:
-When Rath's blue eyes emit something gloomy in the dark,
-
---- Entry 967 (Type: 6) ---
-Text:
-I unintentionally gulp.
-
---- Entry 968 (Type: 5) ---
-Text:
-My heart trembles.
 ```
 
 **Finding:** Type 0x0F, like Type 0x07, can contain either dialogue continuation OR narration. By including it in the Type 0x02/0x03 combine list, narration text was being labeled with speaker names. The fix removes Type 0x0F from the combine list, allowing it to be processed independently. The additional capital letter check prevents combining entries when a complete sentence is followed by text starting with a capital letter (indicating a new sentence or narration).
